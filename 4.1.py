@@ -10,6 +10,13 @@ from math import ceil
 CONFIG_FILE = "config.json"
 VIDEO_EXTS = (".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".webm")
 
+THEMES = {
+    "Dark": {"window": "#222", "text": "#eee", "panel": "#333", "combo_bg": "#222", "combo_text": "#eee"},
+    "Light": {"window": "#f0f0f0", "text": "#000", "panel": "#ddd", "combo_bg": "#fff", "combo_text": "#000"},
+    "Netflix": {"window": "#141414", "text": "#e50914", "panel": "#222", "combo_bg": "#222", "combo_text": "#e50914"},
+    "Fun": {"window": "#fffae3", "text": "#222", "panel": "#ffd700", "combo_bg": "#ffd700", "combo_text": "#222"}
+}
+
 def load_config():
     if os.path.exists(CONFIG_FILE):
         try:
@@ -241,9 +248,6 @@ def format_seconds(sec):
         return f"{h:02d}:{m:02d}:{s:02d}"
     return f"{m:02d}:{s:02d}"
 
-import os, platform, sys
-from PyQt5 import QtCore, QtGui, QtWidgets
-import vlc
 
 def format_seconds(seconds):
     seconds = max(0, int(seconds))
@@ -276,7 +280,7 @@ class MouseWatcher(QtCore.QObject):
 class VLCPlayerWindow(QtWidgets.QMainWindow):
     closed = QtCore.pyqtSignal()
 
-    def __init__(self, config):
+    def __init__(self, config, theme="Netflix"):
         super().__init__(None)
 
         # store config immediately
@@ -298,7 +302,16 @@ class VLCPlayerWindow(QtWidgets.QMainWindow):
         # Controls bar container
         self.controls = QtWidgets.QWidget(self)
         self.controls.setAutoFillBackground(True)
-        self.controls.setStyleSheet("background-color: rgba(200,0,0,160);")
+        if theme == "Dark":
+            self.controls.setStyleSheet("background-color: rgba(51,51,51,160);")
+        elif theme == "Netflix":
+            self.controls.setStyleSheet("background-color: rgba(200,0,0,160);")
+        elif theme == "Fun":
+            self.controls.setStyleSheet("background-color: rgba(255,215,0,160);")
+        elif theme == "Light":
+            self.controls.setStyleSheet("background-color: rgba(240,240,240,160);")
+        else:
+            self.controls.setStyleSheet("background-color: rgba(200,0,0,160);")
         self.controls.setGeometry(0, self.height() - 60, self.width(), 60)
 
         # Opacity effect
@@ -349,6 +362,11 @@ class VLCPlayerWindow(QtWidgets.QMainWindow):
         self.setMouseTracking(True)
         self.video_frame.setMouseTracking(True)
         self.installEventFilter(self)
+        
+        # Global mouse watcher
+        self.mouse_watcher = MouseWatcher(self)
+        self.mouse_watcher.movement.connect(self.on_global_mouse_move)
+
 
         # Initially block signals
         self.audio_combo.blockSignals(True)
@@ -385,7 +403,17 @@ class VLCPlayerWindow(QtWidgets.QMainWindow):
         # Fullscreen toggle
         self.shortcut_fullscreen = QtWidgets.QShortcut(QtGui.QKeySequence("F"), self)
         self.shortcut_fullscreen.activated.connect(self.toggle_fullscreen)
-        self.controls.setStyleSheet("background-color: red;")
+        if theme == "Dark":
+            self.controls.setStyleSheet(f"background-color: {THEMES[theme]['panel']};")
+        elif theme == "Netflix":
+            self.controls.setStyleSheet(f"background-color: {THEMES[theme]['panel']};")
+        elif theme == "Fun":
+            self.controls.setStyleSheet(f"background-color: {THEMES[theme]['panel']};")
+        elif theme == "Light":
+            self.controls.setStyleSheet(f"background-color: {THEMES[theme]['panel']};")
+        else:
+            self.controls.setStyleSheet(f"background-color: {THEMES['Netflix']['panel']};")
+        
 
     def toggle_play_pause(self):
         print("?")
@@ -400,13 +428,16 @@ class VLCPlayerWindow(QtWidgets.QMainWindow):
             self.mplayer.set_time(max(0, cur + ms))
         except:
             pass
+        
+    def on_global_mouse_move(self):
+        self.fade_in_controls()
+        self.inactivity_timer.start()  # restart timer
 
     def toggle_mute(self):
         self.mplayer.audio_toggle_mute()
 
     # --- Fade controls ---
     def fade_in_controls(self):
-        print("Fading in")
         self.anim.stop()
         self.anim.setDuration(200)
         self.anim.setStartValue(self.opacity_effect.opacity())
@@ -415,7 +446,6 @@ class VLCPlayerWindow(QtWidgets.QMainWindow):
         self.inactivity_timer.start()  # restart timer
 
     def fade_out_controls(self):
-        print("Fading out")
         self.anim.stop()
         self.anim.setDuration(400)
         self.anim.setStartValue(self.opacity_effect.opacity())
@@ -430,16 +460,17 @@ class VLCPlayerWindow(QtWidgets.QMainWindow):
 
     # --- Detect mouse movement ---
     def mouseMoveEvent(self, event):
-        print("Movement?")
         self.fade_in_controls()
+        self.inactivity_timer.start()   # reset timer
         super().mouseMoveEvent(event)
 
     # --- Event filter for global mouse detection ---
     def eventFilter(self, obj, event):
         if event.type() == QtCore.QEvent.MouseMove:
-            print("Movement Detected")
             self.fade_in_controls()
+            self.inactivity_timer.start()   # reset timer
         return super().eventFilter(obj, event)
+
 
     # --- Fullscreen toggle ---
     def keyPressEvent(self, event):
@@ -504,6 +535,9 @@ class VLCPlayerWindow(QtWidgets.QMainWindow):
         else:
             self.mplayer.set_xwindow(winid)
         self.mplayer.play()  # start playback
+        self.fade_in_controls()  # show initially
+        self.inactivity_timer.start()  # begin tracking inactivity
+
         QtCore.QTimer.singleShot(1000, lambda: self.mplayer.video_set_spu(-1))
 
         # Wait a short delay to let VLC initialize
@@ -563,49 +597,6 @@ class VLCPlayerWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Playback Error", f"Failed to start video:\n{e}")
 
     # --- Track loading ---
-    """def load_tracks(self):
-        #Populate subtitle and audio track dropdowns safely.
-        print("Done")
-        try:
-            # Subtitles
-            self.subtitle_dropdown.clear()
-            print("Done")
-            spu_tracks = self.mplayer.video_get_spu_description()
-            if spu_tracks:
-                for track in spu_tracks:
-                    try:
-                        tid, name = track
-                        self.subtitle_dropdown.addItem(str(name), tid)
-                    except Exception as inner_e:
-                        print("Bad SPU track entry:", track, inner_e)
-
-                print("Done")
-                current_spu = self.mplayer.video_get_spu()
-                idx = self.subtitle_dropdown.findData(current_spu)
-                if idx >= 0:
-                    self.subtitle_dropdown.setCurrentIndex(idx)
-
-            # Audio
-            print("Done")
-            self.audio_dropdown.clear()
-            audio_tracks = self.mplayer.audio_get_track_description()
-            print("Done")
-            if audio_tracks:
-                for track in audio_tracks:
-                    try:
-                        tid, name = track
-                        self.audio_dropdown.addItem(str(name), tid)
-                    except Exception as inner_e:
-                        print("Bad audio track entry:", track, inner_e)
-
-                current_audio = self.mplayer.audio_get_track()
-                idx = self.audio_dropdown.findData(current_audio)
-                if idx >= 0:
-                    self.audio_dropdown.setCurrentIndex(idx)
-                    print("Done")
-
-        except Exception as e:
-            print("load_tracks error:", e)"""
     def load_tracks(self):
         # --- Subtitles ---
         self.subs_combo.blockSignals(True)
@@ -913,7 +904,7 @@ class SeriesItem(QtCore.QObject):
         return 0, 0
 
 
-
+"""
 class SeriesWindow(QtWidgets.QWidget):
     def __init__(self, series_item, config, parent=None):
         super().__init__(parent)
@@ -989,9 +980,9 @@ class SeriesWindow(QtWidgets.QWidget):
             player.show()
 
     def extract_thumbnail(self, path):
-        """Optional: extract frame thumbnail from video (placeholder now)."""
+        ""Optional: extract frame thumbnail from video (placeholder now).""
         # TODO: use ffmpeg or QPixmap fallback
-        return None
+        return None"""
 
 class EpisodeItem(QtCore.QObject):
     updated = QtCore.pyqtSignal()  # emitted when poster is downloaded
@@ -1113,7 +1104,7 @@ class FlowLayout(QtWidgets.QLayout):
 # EpisodeCard
 # ---------------------------
 class EpisodeCard(QtWidgets.QFrame):
-    def __init__(self, episode, open_episode_func, base_width=130):
+    def __init__(self, episode, open_episode_func, base_width=130, theme="Dark"):
         super().__init__()
         self.episode = episode
         self.open_episode_func = open_episode_func
@@ -1122,7 +1113,19 @@ class EpisodeCard(QtWidgets.QFrame):
         self.spacing = 5
 
         self.setCursor(QtCore.Qt.PointingHandCursor)
-        self.setStyleSheet("border-radius:6px; background-color:#333;")
+        print(theme)
+        
+        if theme == "Dark":
+            self.setStyleSheet("border-radius:6px; background-color:#333;")
+        elif theme == "Netflix":
+            self.setStyleSheet(f"border-radius:6px; background-color:{THEMES['Netflix']['panel']};")
+        elif theme == "Fun":
+            self.setStyleSheet(f"border-radius:6px; background-color:{THEMES['Fun']['panel']};")
+        elif theme == "Light":
+            self.setStyleSheet(f"border-radius:6px; background-color:{THEMES['Light']['panel']};")
+        else:
+            self.setStyleSheet("border-radius:6px; background-color:#333;")
+            
         self.setMinimumSize(self.base_width, 150)
         self.setMaximumWidth(self.base_width*2)
 
@@ -1133,7 +1136,16 @@ class EpisodeCard(QtWidgets.QFrame):
 
         # Thumbnail placeholder
         pixmap = QtGui.QPixmap(1, 1)
-        pixmap.fill(QtGui.QColor("#555"))
+        if theme == "Dark":
+            pixmap.fill(QtGui.QColor("#555"))
+        elif theme == "Netflix":
+            pixmap.fill(QtGui.QColor(THEMES['Netflix']['combo_bg']))
+        elif theme == "Fun":
+            pixmap.fill(QtGui.QColor(THEMES['Fun']['combo_bg']))
+        elif theme == "Light":
+            pixmap.fill(QtGui.QColor(THEMES['Light']['combo_bg']))
+        else:
+            pixmap.fill(QtGui.QColor("#555"))
         self.thumb_label = QtWidgets.QLabel()
         self.thumb_label.setPixmap(pixmap)
         self.thumb_label.setAlignment(QtCore.Qt.AlignCenter)
@@ -1144,8 +1156,18 @@ class EpisodeCard(QtWidgets.QFrame):
         self.text_label = QtWidgets.QLabel(text)
         self.text_label.setWordWrap(True)
         self.text_label.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignHCenter)
-        self.text_label.setStyleSheet("color:white; font-size:18px;")
+        if theme == "Dark":
+            self.text_label.setStyleSheet("color:white; font-size:18px;")
+        elif theme == "Netflix":
+            self.text_label.setStyleSheet(f"color:{THEMES['Netflix']['text']}; font-size:18px;")
+        elif theme == "Fun":
+            self.text_label.setStyleSheet(f"color:{THEMES['Fun']['text']}; font-size:18px;")
+        elif theme == "Light":
+            self.text_label.setStyleSheet(f"color:{THEMES['Light']['text']}; font-size:18px;")
+        else:
+            self.text_label.setStyleSheet("color:white; font-size:18px;")
         layout.addWidget(self.text_label)
+        print("Added text label")
 
         # Click handling
         self.mousePressEvent = lambda event: self.open_episode_func(getattr(self.episode, "path", str(self.episode)))
@@ -1160,13 +1182,15 @@ class EpisodeCard(QtWidgets.QFrame):
 # SeasonWidget
 # ---------------------------
 class SeasonWidget(QtWidgets.QWidget):
-    def __init__(self, episodes, open_episode_func, base_width=130):
+    def __init__(self, episodes, open_episode_func, base_width=130, theme="Dark"):
         super().__init__()
         self.episodes = episodes
         self.open_episode_func = open_episode_func
         self.base_width = base_width
         self.zoom_factor = 1.0
         self.spacing = 10
+
+        self.theme = theme
 
         self.grid = QtWidgets.QGridLayout(self)
         self.grid.setContentsMargins(0,0,0,0)
@@ -1186,7 +1210,7 @@ class SeasonWidget(QtWidgets.QWidget):
     def lazy_create_cards(self):
         if self.cards is not None:
             return
-        self.cards = [EpisodeCard(e, self.open_episode_func, self.base_width) for e in self.episodes]
+        self.cards = [EpisodeCard(e, self.open_episode_func, self.base_width, self.theme) for e in self.episodes]
         self.rearrange_cards()
 
     def rearrange_cards(self):
@@ -1243,7 +1267,7 @@ class SeasonWidget(QtWidgets.QWidget):
 # CollapsibleSeasonWidget
 # ---------------------------
 class CollapsibleSeasonWidget(QtWidgets.QWidget):
-    def __init__(self, season_name, episodes, open_episode_func):
+    def __init__(self, season_name, episodes, open_episode_func, theme="Dark"):
         super().__init__()
         self.expanded = True
 
@@ -1251,18 +1275,40 @@ class CollapsibleSeasonWidget(QtWidgets.QWidget):
         layout.setContentsMargins(0,0,0,0)
         layout.setSpacing(2)
 
+        self.theme = theme
+
         # Toggle button
         self.toggle_btn = QtWidgets.QPushButton(f"▼ {season_name}")
         self.toggle_btn.setCheckable(True)
         self.toggle_btn.setChecked(True)
         self.toggle_btn.clicked.connect(self.toggle)
-        self.toggle_btn.setStyleSheet(
-            "text-align:left; font-size:16px; color:#ccc; background:#222; padding:6px;"
-        )
+        # Set buttons to be colour coded to the theme
+        print("Trying out the theme")
+        if theme == "Dark":
+            self.toggle_btn.setStyleSheet(
+                "text-align:left; font-size:16px; color:#ccc; background:#222; padding:6px;"
+            )
+        elif theme == "Light":
+            self.toggle_btn.setStyleSheet(f"text-align:left; font-size:16px; color:{THEMES['Light']['text']}; background:{THEMES['Light']['panel']}; padding:6px;")
+
+        elif theme == "Fun":
+            self.toggle_btn.setStyleSheet(f"text-align:left; font-size:16px; color:{THEMES['Fun']['text']}; background:{THEMES['Fun']['panel']}; padding:6px;")
+
+        elif theme == "Netflix":
+            print("Theme of netflix")
+            self.toggle_btn.setStyleSheet(f"text-align:left; font-size:16px; color:{THEMES['Netflix']['text']}; background:{THEMES['Netflix']['panel']}; padding:6px;")
+        else:
+            print("Invalid colour scheme, using Dark as default")
+            print(theme)
+            self.toggle_btn.setStyleSheet(
+                "text-align:left; font-size:16px; color:#ccc; background:#222; padding:6px;"
+            )
         layout.addWidget(self.toggle_btn)
 
         # Season content
-        self.season_widget = SeasonWidget(episodes, open_episode_func)
+        print("Passing in")
+        self.season_widget = SeasonWidget(episodes, open_episode_func, theme = self.theme)
+        print("Passed out", self.theme)
         layout.addWidget(self.season_widget)
 
     def toggle(self):
@@ -1274,7 +1320,7 @@ class CollapsibleSeasonWidget(QtWidgets.QWidget):
 
 
 class SeriesViewerWindow(QtWidgets.QWidget):
-    def __init__(self, series_item):
+    def __init__(self, series_item, theme="Dark"):
         super().__init__()
         self.series_item = series_item
         self.setWindowTitle(series_item.title)
@@ -1297,7 +1343,8 @@ class SeriesViewerWindow(QtWidgets.QWidget):
         self.container_layout.setAlignment(QtCore.Qt.AlignTop)  # top alignment only
         self.container_layout.setSpacing(15)
 
-
+        self.theme = theme
+        
         scroll.setWidget(self.container)
 
         self.populate_episodes()
@@ -1323,7 +1370,7 @@ class SeriesViewerWindow(QtWidgets.QWidget):
         parsed_seasons = parse_series_folder(root_folder)
 
         for season_name, episodes in sorted(parsed_seasons.items()):
-            collapsible = CollapsibleSeasonWidget(season_name, episodes, self.open_episode)
+            collapsible = CollapsibleSeasonWidget(season_name, episodes, self.open_episode, theme=self.theme)
             self.container_layout.addWidget(collapsible)
 
         self.container_layout.addStretch(1)
@@ -1332,7 +1379,7 @@ class SeriesViewerWindow(QtWidgets.QWidget):
 
     def open_episode(self, path):
         # Open VLC player for this episode
-        player = VLCPlayerWindow(config)
+        player = VLCPlayerWindow(config, self.theme)
         player.play(path)
         player.show()
 
@@ -1345,7 +1392,7 @@ class SeriesViewerWindow(QtWidgets.QWidget):
     def on_episode_double_click(self, item, column):
         ep = item.data(0, QtCore.Qt.UserRole)
         if ep:
-            player = VLCPlayerWindow(config)
+            player = VLCPlayerWindow(config, self.theme)
             player.play(ep.path)
             player.show()
 
@@ -1369,7 +1416,7 @@ class SeriesViewerWindow(QtWidgets.QWidget):
             QtWidgets.QMessageBox.warning(self, "File not found", path)
             return
 
-        player = VLCPlayerWindow(config)
+        player = VLCPlayerWindow(config, self.theme)
         self.player_windows.append(player)
         # Stop playback and release when window closes
         player.closed.connect(lambda: self.player_windows.remove(player) if player in self.player_windows else None)
@@ -1456,10 +1503,10 @@ class VideoDelegate(QtWidgets.QStyledItemDelegate):
 # ---------------- Main Library Window ----------------
 class LibraryWindow(QtWidgets.QWidget):
     THEMES = {
-        "Dark": {"window": "#222", "text": "#eee", "panel": "#333"},
-        "Light": {"window": "#f0f0f0", "text": "#000", "panel": "#ddd"},
-        "Netflix": {"window": "#141414", "text": "#e50914", "panel": "#222"},
-        "Fun": {"window": "#fffae3", "text": "#222", "panel": "#ffd700"}
+        "Dark": {"window": "#222", "text": "#eee", "panel": "#333", "combo_bg": "#222", "combo_text": "#eee"},
+        "Light": {"window": "#f0f0f0", "text": "#000", "panel": "#ddd", "combo_bg": "#fff", "combo_text": "#000"},
+        "Netflix": {"window": "#141414", "text": "#e50914", "panel": "#222", "combo_bg": "#222", "combo_text": "#e50914"},
+        "Fun": {"window": "#fffae3", "text": "#222", "panel": "#ffd700", "combo_bg": "#ffd700", "combo_text": "#222"}
     }
 
     def __init__(self, config):
@@ -1506,6 +1553,37 @@ class LibraryWindow(QtWidgets.QWidget):
         zoom_out_btn = QtWidgets.QPushButton("Zoom -")
         zoom_out_btn.clicked.connect(lambda: self.change_zoom(0.8))
         top_row.addWidget(zoom_out_btn)
+        
+        # Theme combo
+        self.theme_combo = QtWidgets.QComboBox()
+        self.theme_combo.addItems(self.THEMES.keys())
+
+        # Restore last theme from config
+        last_theme = self.config.get("theme", "Dark")
+        if last_theme in self.THEMES:
+            self.theme_combo.setCurrentText(last_theme)
+
+        self.theme_combo.currentTextChanged.connect(self.on_theme_changed)
+        top_row.addWidget(self.theme_combo)
+        print("Themes restored")
+
+
+        # Type filter combo
+        self.type_combo = QtWidgets.QComboBox()
+        self.type_combo.addItems(["All", "Movies", "Series"])
+        print("Movie Series Filter Added")
+
+        # Load last type filter from config
+        last_type = str(self.config.get("last_type", "All")).strip()
+        index = self.type_combo.findText(last_type)
+        if index != -1:
+            self.type_combo.setCurrentIndex(index)
+            self.type_combo.currentTextChanged.connect(self.on_type_changed)
+        
+        else:
+            self.type_combo.currentTextChanged.connect(self.refresh_list)
+        top_row.addWidget(self.type_combo)
+        print("** Connected")
 
         # Include Subfolders Checkbox (Currently used for Series)
         self.recursive_checkbox = QtWidgets.QCheckBox("Include subfolders")
@@ -1530,6 +1608,10 @@ class LibraryWindow(QtWidgets.QWidget):
         left_layout.addWidget(self.list_view)
         self.list_view.clicked.connect(self.on_item_clicked)
 
+        self.list_view.setDragEnabled(False)
+        self.list_view.setAcceptDrops(False)
+        self.list_view.setDropIndicatorShown(False)
+
         main_layout.addWidget(left_widget, 3)
 
         # Right panel: description
@@ -1550,13 +1632,26 @@ class LibraryWindow(QtWidgets.QWidget):
         self.apply_theme(self.current_theme)
 
         # Window settings
-        self.resize(1900, 1050)
         self.setWindowTitle("My Video Library")
-        self.show()
+        self.showMaximized()
+        #self.showFullScreen()
 
         # Initial refresh
         self.refresh_list()
         
+    def on_theme_changed(self, theme_name):
+        self.config["theme"] = theme_name
+        save_config(self.config)
+        self.apply_theme(theme_name)
+
+
+    def on_type_changed(self, text):
+        self.config["last_type"] = text
+        save_config(self.config)
+        self.refresh_list()
+
+
+
     def _rebuild_model(self, filtered_items=None):
         """Build or update the QStandardItemModel from given VideoItems."""
         if filtered_items is None:
@@ -1755,7 +1850,7 @@ class LibraryWindow(QtWidgets.QWidget):
             # Keep a reference so it doesn’t get garbage collected
             if not hasattr(self, "series_windows"):
                 self.series_windows = []
-            viewer = SeriesViewerWindow(item)
+            viewer = SeriesViewerWindow(item, self.current_theme)
             self.series_windows.append(viewer)
             # Remove from list when closed
             viewer.destroyed.connect(lambda: self.series_windows.remove(viewer) if viewer in self.series_windows else None)
@@ -1781,13 +1876,50 @@ class LibraryWindow(QtWidgets.QWidget):
         player.show()
 
     # ---------------- Theme ----------------
+    """
     def apply_theme(self, name):
         t = self.THEMES.get(name, self.THEMES["Dark"])
         pal = self.palette()
         pal.setColor(QtGui.QPalette.Window, QtGui.QColor(t["window"]))
         pal.setColor(QtGui.QPalette.WindowText, QtGui.QColor(t["text"]))
         self.setPalette(pal)
-        self.desc_panel.setStyleSheet(f"background:{t['panel']}; color:{t['text']}; font-size:14px;")
+        self.desc_panel.setStyleSheet(f"background:{t['panel']}; color:{t['text']}; font-size:14px;")"""
+    def apply_theme(self, theme_name):
+        self.current_theme = theme_name
+        theme = self.THEMES[theme_name]
+
+        # Apply main window style
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {theme['window']};
+                color: {theme['text']};
+            }}
+        """)
+
+        # Apply styles to combo boxes (all QComboBox children)
+        for combo in self.findChildren(QtWidgets.QComboBox):
+            combo.setStyleSheet(f"""
+                QComboBox {{
+                    background-color: {theme['combo_bg']};
+                    color: {theme['combo_text']};
+                    padding: 2px 5px;
+                }}
+                QComboBox::drop-down {{
+                    subcontrol-origin: padding;
+                    subcontrol-position: top right;
+                    width: 15px;
+                    border-left-width: 1px;
+                    border-left-color: gray;
+                    border-left-style: solid;
+                    border-radius: 0px;
+                }}
+                QComboBox QAbstractItemView {{
+                    background-color: {theme['combo_bg']};
+                    color: {theme['combo_text']};
+                    selection-background-color: {theme['panel']};
+                }}
+            """)
+
 
 
 if __name__=="__main__":
