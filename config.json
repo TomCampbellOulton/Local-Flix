@@ -1,0 +1,15 @@
+{
+    "tmdb_api_key": "YOUR_API_KEY_HERE",
+    "last_directory": "",
+    "last_dir": "",
+    "last_watched": "",
+    "theme": "Netflix",
+    "zoom_factor": 3.0,
+    "positions": {
+    },
+    "library_dirs": [],
+    "folders": [
+        "C:/Users/tcamp/Videos/Movies",
+        "D:/Movies"
+    ]
+}
